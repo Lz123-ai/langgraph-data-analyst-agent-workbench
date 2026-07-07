@@ -1,0 +1,175 @@
+[
+  {
+    "id": "dataset_overview_cn",
+    "dataset_path": "agent_eval/fixtures/sales_orders_cn.csv",
+    "question": "这个数据集有多少条订单、多少个原始字段？日期范围是什么？",
+    "expected_kind": "dataset_overview",
+    "expected_path": "duckdb_sql",
+    "first_row_contains": {
+      "row_count": 10,
+      "column_count": 9
+    },
+    "report_keywords": ["10 行记录", "9 个原始字段", "日期范围"]
+  },
+  {
+    "id": "top_profit_product_cn",
+    "dataset_path": "agent_eval/fixtures/sales_orders_cn.csv",
+    "question": "利润最高的商品名称是什么？",
+    "expected_kind": "top_records",
+    "expected_path": "duckdb_sql",
+    "first_row_contains": {
+      "商品名称": "文件夹",
+      "利润": 8000
+    },
+    "report_keywords": ["文件夹", "8000"]
+  },
+  {
+    "id": "market_expand_shanghai_cn",
+    "dataset_path": "agent_eval/fixtures/sales_orders_cn.csv",
+    "question": "上海哪类商品建议扩大市场？",
+    "expected_kind": "market_recommendation",
+    "expected_path": "duckdb_sql",
+    "first_row_contains": {
+      "dimension": "家具"
+    },
+    "report_keywords": ["家具", "扩张机会", "上海"]
+  },
+  {
+    "id": "data_quality_cn",
+    "dataset_path": "agent_eval/fixtures/sales_orders_cn.csv",
+    "question": "数据质量有哪些明显问题？",
+    "expected_kind": "data_quality",
+    "expected_path": "pandas",
+    "any_row_contains": {
+      "issue_type": "缺失值",
+      "column": "客户评分"
+    },
+    "report_keywords": ["数据质量扫描", "缺失值", "客户评分"]
+  },
+  {
+    "id": "city_sales_sum_cn",
+    "dataset_path": "agent_eval/fixtures/sales_orders_cn.csv",
+    "question": "按城市统计总销售额最高的城市，并生成图表",
+    "expected_kind": "group_aggregate",
+    "expected_path": "duckdb_sql",
+    "first_row_contains": {
+      "dimension": "上海",
+      "sum_销售额": 51200
+    },
+    "report_keywords": ["上海", "51200"]
+  },
+  {
+    "id": "sales_profit_correlation_cn",
+    "dataset_path": "agent_eval/fixtures/sales_orders_cn.csv",
+    "question": "分析销售额和利润的相关性",
+    "expected_kind": "correlation",
+    "expected_path": "pandas",
+    "metrics_contains": {
+      "method": "pearson"
+    },
+    "report_keywords": ["Pearson", "correlation", "p 值"]
+  },
+  {
+    "id": "profit_distribution_cn",
+    "dataset_path": "agent_eval/fixtures/sales_orders_cn.csv",
+    "question": "分析利润的分布",
+    "expected_kind": "distribution",
+    "expected_path": "pandas",
+    "report_keywords": ["分布", "均值"]
+  },
+  {
+    "id": "quantity_outlier_cn",
+    "dataset_path": "agent_eval/fixtures/sales_orders_cn.csv",
+    "question": "检测数量的异常值",
+    "expected_kind": "outlier",
+    "expected_path": "pandas",
+    "any_row_contains": {
+      "数量": 200
+    },
+    "report_keywords": ["异常值", "数量"]
+  },
+  {
+    "id": "mrr_scope_saas_cn",
+    "dataset_path": "agent_eval/fixtures/saas_subscriptions_cn.csv",
+    "question": "当前 MRR 与累计 MRR 的口径区分。",
+    "expected_kind": "mrr_snapshot_vs_cumulative",
+    "expected_path": "pandas",
+    "first_row_contains": {
+      "口径": "当前 MRR",
+      "MRR": 700
+    },
+    "report_keywords": ["累计 MRR", "不能当作当前 MRR", "客户-月份"]
+  },
+  {
+    "id": "risk_customer_ranking_saas_cn",
+    "dataset_path": "agent_eval/fixtures/saas_subscriptions_cn.csv",
+    "question": "12 月高风险客户和高风险 MRR 排名。",
+    "expected_kind": "risk_customer_ranking",
+    "expected_path": "pandas",
+    "first_row_contains": {
+      "客户ID": "CUST-003",
+      "MRR": 300
+    },
+    "report_keywords": ["高风险客户", "MRR", "12 月"]
+  },
+  {
+    "id": "payment_renewal_risk_saas_cn",
+    "dataset_path": "agent_eval/fixtures/saas_subscriptions_cn.csv",
+    "question": "账款风险与续约风险联动分析。",
+    "expected_kind": "business_template_analysis",
+    "expected_path": "pandas",
+    "metrics_contains": {
+      "template_id": "payment_renewal_risk"
+    },
+    "first_row_contains": {
+      "口径": "逾期/支付失败账款",
+      "发票金额": 650
+    },
+    "report_keywords": ["账款", "续约风险", "催收优先级"]
+  },
+  {
+    "id": "customer_success_priority_saas_cn",
+    "dataset_path": "agent_eval/fixtures/saas_subscriptions_cn.csv",
+    "question": "12 月按客户经理比较客户数、MRR、高风险客户数和高风险 MRR，谁最需要优先处理？",
+    "expected_kind": "business_template_analysis",
+    "expected_path": "pandas",
+    "metrics_contains": {
+      "template_id": "customer_success_priority"
+    },
+    "first_row_contains": {
+      "客户经理": "Grace",
+      "高风险MRR": 300
+    },
+    "report_keywords": ["客户成功优先级", "高风险MRR"]
+  },
+  {
+    "id": "sales_overview_status_cn",
+    "dataset_path": "agent_eval/fixtures/sales_business_cn.csv",
+    "question": "计算总销售额、总利润、整体利润率，并区分全部订单和已完成订单。",
+    "expected_kind": "business_template_analysis",
+    "expected_path": "pandas",
+    "metrics_contains": {
+      "template_id": "sales_overview_status"
+    },
+    "first_row_contains": {
+      "口径": "全部订单",
+      "销售额": 430
+    },
+    "report_keywords": ["全部订单", "已完成订单", "整体利润率"]
+  },
+  {
+    "id": "product_pareto_sales_cn",
+    "dataset_path": "agent_eval/fixtures/sales_business_cn.csv",
+    "question": "哪些商品贡献了主要销售额和利润？是否存在集中度风险？",
+    "expected_kind": "business_template_analysis",
+    "expected_path": "pandas",
+    "metrics_contains": {
+      "template_id": "product_pareto"
+    },
+    "first_row_contains": {
+      "商品名称": "显示器",
+      "销售额": 300
+    },
+    "report_keywords": ["商品 Pareto", "累计销售额占比"]
+  }
+]

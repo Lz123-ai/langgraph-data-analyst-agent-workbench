@@ -1,0 +1,37 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    environment:
+      MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-20971520}
+      CORS_ORIGINS: http://127.0.0.1:8080,http://localhost:8080
+      USE_LLM: ${USE_LLM:-false}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4.1-mini}
+      PROMPT_VERSION: ${PROMPT_VERSION:-rule-first-v1}
+      DEFAULT_TOKEN_BUDGET: ${DEFAULT_TOKEN_BUDGET:-50000}
+      INPUT_TOKEN_PRICE_PER_1K: ${INPUT_TOKEN_PRICE_PER_1K:-0.00015}
+      OUTPUT_TOKEN_PRICE_PER_1K: ${OUTPUT_TOKEN_PRICE_PER_1K:-0.0006}
+    volumes:
+      - backend_data:/app/data
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "8080:80"
+
+volumes:
+  backend_data:

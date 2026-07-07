@@ -1,0 +1,13 @@
+date,region,category,sales,profit,units
+2026-01-05,East,Software,12000,4200,18
+2026-01-12,East,Hardware,8600,2100,9
+2026-01-20,West,Software,9800,3400,14
+2026-02-04,West,Services,14200,5600,22
+2026-02-15,North,Hardware,7600,1800,8
+2026-02-18,South,Software,16100,6900,24
+2026-03-03,North,Services,11000,4100,16
+2026-03-11,South,Hardware,9300,2600,11
+2026-03-23,East,Services,18700,7700,26
+2026-04-08,West,Hardware,7200,1500,7
+2026-04-19,North,Software,13400,5100,19
+2026-04-27,South,Services,20100,8400,29
