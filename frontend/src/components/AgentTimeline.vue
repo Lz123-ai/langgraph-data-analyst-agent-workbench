@@ -77,6 +77,7 @@ function nodeLabel(node: string): string {
 function eventTypeLabel(eventType: string): string {
   const labels: Record<string, string> = {
     task_started: '任务已开始',
+    task_resumed: '任务已恢复',
     node_completed: '节点已完成',
     task_completed: '任务已完成',
     task_failed: '任务失败',

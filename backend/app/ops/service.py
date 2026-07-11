@@ -13,6 +13,7 @@ from app.ops.models import (
     AgentTaskRecord,
     EvalRunRecord,
     IdentityContext,
+    NodePayloadMetricRecord,
     TokenUsageRecord,
     TraceSpanRecord,
 )
@@ -60,6 +61,10 @@ class AgentOpsService:
         task.started_at = task.started_at or now
         task.updated_at = now
         self.storage.update_task(task)
+
+    def reset_task_for_retry(self, task_id: str) -> None:
+        self.require_task(task_id)
+        self.storage.reset_task_for_retry(task_id)
 
     def record_trace_span(
         self,
@@ -115,6 +120,30 @@ class AgentOpsService:
             completion_tokens=completion_tokens,
             source="estimated",
         )
+
+    def record_node_payload_metric(
+        self,
+        *,
+        task_id: str,
+        node: str,
+        input_summary: str,
+        output_payload: Any,
+    ) -> NodePayloadMetricRecord:
+        task = self.require_task(task_id)
+        output_text = _compact_json(output_payload)
+        metric = NodePayloadMetricRecord(
+            metric_id=uuid4().hex,
+            trace_id=task.trace_id,
+            task_id=task_id,
+            node=node,
+            input_chars=len(input_summary),
+            output_chars=len(output_text),
+            output_bytes=len(output_text.encode("utf-8")),
+            output_rows=_count_payload_rows(output_payload),
+            created_at=_now(),
+        )
+        self.storage.add_payload_metric(metric)
+        return metric
 
     def record_token_usage(
         self,
@@ -174,33 +203,87 @@ class AgentOpsService:
         task.updated_at = now
         self.storage.update_task(task)
 
-    def require_task(self, task_id: str) -> AgentTaskRecord:
+    def cancel_task(self, task_id: str, final_state: dict[str, Any] | None = None) -> None:
+        task = self.require_task(task_id)
+        now = _now()
+        task.status = "cancelled"
+        task.completed_at = now
+        task.duration_ms = _duration_ms(task.started_at, now)
+        task.error = "Task cancelled by user."
+        task.final_state = final_state
+        task.updated_at = now
+        self.storage.update_task(task)
+
+    def require_task(self, task_id: str, identity: IdentityContext | None = None) -> AgentTaskRecord:
         task = self.storage.get_task(task_id)
         if task is None:
             raise HTTPException(status_code=404, detail="Agent task not found.")
+        if identity and (task.tenant_id != identity.tenant_id or task.user_id != identity.user_id):
+            raise HTTPException(status_code=404, detail="Agent task not found.")
         return task
 
-    def list_tasks(self, limit: int = 50, tenant_id: str | None = None) -> list[AgentTaskRecord]:
-        return self.storage.list_tasks(limit=max(1, min(limit, 100)), tenant_id=tenant_id)
+    def list_tasks(
+        self,
+        limit: int = 50,
+        tenant_id: str | None = None,
+        user_id: str | None = None,
+    ) -> list[AgentTaskRecord]:
+        return self.storage.list_tasks(
+            limit=max(1, min(limit, 100)),
+            tenant_id=tenant_id,
+            user_id=user_id,
+        )
 
-    def delete_task(self, task_id: str) -> None:
-        self.require_task(task_id)
+    def delete_task(self, task_id: str, identity: IdentityContext | None = None) -> None:
+        self.require_task(task_id, identity)
         self.storage.delete_task(task_id)
 
-    def list_trace(self, task_id: str) -> list[TraceSpanRecord]:
-        self.require_task(task_id)
+    def list_trace(self, task_id: str, identity: IdentityContext | None = None) -> list[TraceSpanRecord]:
+        self.require_task(task_id, identity)
         return self.storage.list_trace(task_id)
 
-    def list_token_usage(self, task_id: str | None = None, limit: int = 100) -> list[TokenUsageRecord]:
+    def list_token_usage(
+        self,
+        task_id: str | None = None,
+        limit: int = 100,
+        identity: IdentityContext | None = None,
+    ) -> list[TokenUsageRecord]:
         if task_id:
-            self.require_task(task_id)
-        return self.storage.list_token_usage(task_id=task_id, limit=max(1, min(limit, 500)))
+            self.require_task(task_id, identity)
+        safe_limit = max(1, min(limit, 500))
+        usage = self.storage.list_token_usage(task_id=task_id, limit=500 if identity and not task_id else safe_limit)
+        if identity and not task_id:
+            allowed = {
+                task.task_id
+                for task in self.storage.list_tasks(limit=500, tenant_id=identity.tenant_id, user_id=identity.user_id)
+            }
+            usage = [item for item in usage if item.task_id in allowed]
+        return usage[:safe_limit]
 
-    def get_task_detail(self, task_id: str) -> tuple[AgentTaskRecord, list[TraceSpanRecord], list[TokenUsageRecord]]:
-        return self.require_task(task_id), self.list_trace(task_id), self.list_token_usage(task_id=task_id)
+    def get_task_detail(
+        self,
+        task_id: str,
+        identity: IdentityContext | None = None,
+    ) -> tuple[AgentTaskRecord, list[TraceSpanRecord], list[TokenUsageRecord]]:
+        return (
+            self.require_task(task_id, identity),
+            self.list_trace(task_id, identity),
+            self.list_token_usage(task_id=task_id, identity=identity),
+        )
 
-    def summary(self) -> AgentOpsSummary:
-        counts = self.storage.summary_counts()
+    def list_payload_metrics(
+        self,
+        task_id: str,
+        identity: IdentityContext | None = None,
+    ) -> list[NodePayloadMetricRecord]:
+        self.require_task(task_id, identity)
+        return self.storage.list_payload_metrics(task_id)
+
+    def summary(self, identity: IdentityContext | None = None) -> AgentOpsSummary:
+        counts = self.storage.summary_counts(
+            identity.tenant_id if identity else None,
+            identity.user_id if identity else None,
+        )
         statuses = counts["statuses"]
         latest_eval = next(iter(self.storage.list_eval_runs(limit=1)), None)
         return AgentOpsSummary(
@@ -210,6 +293,7 @@ class AgentOpsService:
             failed_count=statuses.get("failed", 0),
             total_tokens=counts["total_tokens"],
             estimated_cost_usd=round(counts["estimated_cost_usd"], 8),
+            deterministic_payload_bytes=counts["deterministic_payload_bytes"],
             latest_eval=latest_eval,
         )
 
@@ -296,6 +380,16 @@ def _compact_json(value: Any) -> str:
 
 def _safe_log_id(value: str) -> str:
     return "".join(char if char.isalnum() or char in {"-", "_"} else "-" for char in value)[:80] or "unknown"
+
+
+def _count_payload_rows(value: Any) -> int:
+    if not isinstance(value, dict):
+        return 0
+    result = value.get("execution_result")
+    if not isinstance(result, dict):
+        return 0
+    tables = result.get("tables") or []
+    return sum(len(table.get("rows") or []) for table in tables if isinstance(table, dict))
 
 
 agent_ops_service = AgentOpsService(AgentOpsStorage(settings.db_path))

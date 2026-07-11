@@ -8,6 +8,7 @@ from fastapi import HTTPException
 from app.improvements.defaults import DEFAULT_IMPROVEMENT_LOGS
 from app.improvements.models import ImprovementLogCreate, ImprovementLogEntry, ImprovementLogUpdate
 from app.improvements.storage import ImprovementLogStorage
+from app.ops.models import IdentityContext
 from app.settings import settings
 
 
@@ -15,10 +16,13 @@ class ImprovementLogService:
     def __init__(self, storage: ImprovementLogStorage) -> None:
         self.storage = storage
 
-    def create_log(self, payload: ImprovementLogCreate) -> ImprovementLogEntry:
+    def create_log(self, payload: ImprovementLogCreate, identity: IdentityContext | None = None) -> ImprovementLogEntry:
+        identity = identity or IdentityContext()
         now = datetime.now(timezone.utc)
         entry = ImprovementLogEntry(
             log_id=uuid4().hex,
+            tenant_id=identity.tenant_id,
+            user_id=identity.user_id,
             issue=payload.issue.strip(),
             resolution=payload.resolution.strip(),
             status=payload.status,
@@ -30,21 +34,36 @@ class ImprovementLogService:
         self.storage.add_log(entry)
         return entry
 
-    def list_logs(self, limit: int = 50) -> list[ImprovementLogEntry]:
-        return self.storage.list_logs(limit=max(1, min(limit, 100)))
+    def list_logs(self, limit: int = 50, identity: IdentityContext | None = None) -> list[ImprovementLogEntry]:
+        identity = identity or IdentityContext()
+        return self.storage.list_logs(
+            tenant_id=identity.tenant_id,
+            user_id=identity.user_id,
+            limit=max(1, min(limit, 100)),
+        )
 
-    def get_log(self, log_id: str) -> ImprovementLogEntry:
+    def get_log(self, log_id: str, identity: IdentityContext | None = None) -> ImprovementLogEntry:
+        identity = identity or IdentityContext()
         entry = self.storage.get_log(log_id)
-        if entry is None:
+        if entry is None or not _is_visible_to_identity(entry, identity):
             raise HTTPException(status_code=404, detail="Improvement log not found.")
         return entry
 
-    def update_log(self, log_id: str, payload: ImprovementLogUpdate) -> ImprovementLogEntry:
-        entry = self.get_log(log_id)
+    def update_log(
+        self,
+        log_id: str,
+        payload: ImprovementLogUpdate,
+        identity: IdentityContext | None = None,
+    ) -> ImprovementLogEntry:
+        identity = identity or IdentityContext()
+        entry = self.get_log(log_id, identity)
+        _require_owner(entry, identity)
         update = payload.model_dump(exclude_unset=True)
         now = datetime.now(timezone.utc)
         updated = ImprovementLogEntry(
             log_id=entry.log_id,
+            tenant_id=entry.tenant_id,
+            user_id=entry.user_id,
             issue=(update.get("issue", entry.issue) or "").strip(),
             resolution=(update.get("resolution", entry.resolution) or "").strip(),
             status=update.get("status", entry.status),
@@ -58,8 +77,10 @@ class ImprovementLogService:
         self.storage.update_log(updated)
         return updated
 
-    def delete_log(self, log_id: str) -> None:
-        self.get_log(log_id)
+    def delete_log(self, log_id: str, identity: IdentityContext | None = None) -> None:
+        identity = identity or IdentityContext()
+        entry = self.get_log(log_id, identity)
+        _require_owner(entry, identity)
         self.storage.delete_log(log_id)
 
     def upsert_system_log(
@@ -76,6 +97,8 @@ class ImprovementLogService:
         now = datetime.now(timezone.utc)
         entry = ImprovementLogEntry(
             log_id=log_id,
+            tenant_id="system",
+            user_id="system",
             issue=issue.strip(),
             resolution=resolution.strip(),
             status=status,  # type: ignore[arg-type]
@@ -95,6 +118,8 @@ class ImprovementLogService:
             created_at = existing.created_at if existing else now
             entry = ImprovementLogEntry(
                 log_id=item.log_id,
+                tenant_id="system",
+                user_id="system",
                 issue=item.issue,
                 resolution=item.resolution,
                 status=item.status,
@@ -114,12 +139,26 @@ def _is_same_log(existing: ImprovementLogEntry | None, entry: ImprovementLogEntr
     if existing is None:
         return False
     return (
-        existing.issue == entry.issue
+        existing.tenant_id == entry.tenant_id
+        and existing.user_id == entry.user_id
+        and existing.issue == entry.issue
         and existing.resolution == entry.resolution
         and existing.status == entry.status
         and existing.dataset_id == entry.dataset_id
         and existing.related_question == entry.related_question
     )
+
+
+def _is_visible_to_identity(entry: ImprovementLogEntry, identity: IdentityContext) -> bool:
+    return (entry.tenant_id, entry.user_id) in {
+        (identity.tenant_id, identity.user_id),
+        ("system", "system"),
+    }
+
+
+def _require_owner(entry: ImprovementLogEntry, identity: IdentityContext) -> None:
+    if (entry.tenant_id, entry.user_id) != (identity.tenant_id, identity.user_id):
+        raise HTTPException(status_code=403, detail="System improvement logs are read-only.")
 
 
 def _optional_strip(value: str | None) -> str | None:

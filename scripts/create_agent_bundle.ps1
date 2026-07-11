@@ -32,13 +32,21 @@ function Copy-ProjectPath {
     ".gitignore",
     ".dockerignore",
     ".env.example",
+    ".coveragerc",
+    "ruff.toml",
     "README.md",
     "AGENT_HANDOFF.md",
+    "CHANGELOG.md",
+    "CONTRIBUTING.md",
+    "SECURITY.md",
+    "CODE_OF_CONDUCT.md",
+    "LICENSE",
     "Makefile",
     "docker-compose.yml",
     "start-dev.bat",
     "stop-dev.bat",
     "requirements.txt",
+    "requirements-dev.txt",
     "pytest.ini",
     "backend/app",
     "backend/Dockerfile",
@@ -52,6 +60,8 @@ function Copy-ProjectPath {
     "frontend/package-lock.json",
     "frontend/tsconfig.json",
     "frontend/vite.config.ts",
+    "frontend/playwright.config.ts",
+    "frontend/e2e",
     "samples",
     "docs",
     "agent_eval/README.md",
@@ -61,7 +71,10 @@ function Copy-ProjectPath {
     "agent_eval/fixtures",
     "scripts/create_agent_bundle.ps1",
     "scripts/start-dev.ps1",
-    "scripts/stop-dev.ps1"
+    "scripts/stop-dev.ps1",
+    "scripts/verify-docker.ps1",
+    "scripts/verify-llm.ps1",
+    ".github"
 ) | ForEach-Object { Copy-ProjectPath $_ }
 
 if ($ExtraDatasetZip) {

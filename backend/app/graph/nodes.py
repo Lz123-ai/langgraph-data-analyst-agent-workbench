@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import re
 from typing import Any
 
@@ -19,8 +18,26 @@ from app.domain import (
     QuestionUnderstanding,
     ReviewNote,
 )
+from app.graph.labels import (
+    business_template_label as _business_template_label,
+)
+from app.graph.labels import (
+    goal_label as _goal_label,
+)
+from app.graph.labels import (
+    operation_label as _operation_label,
+)
+from app.graph.labels import (
+    path_label as _path_label,
+)
+from app.graph.labels import (
+    table_label as _table_label,
+)
 from app.graph.prompts import UNDERSTAND_QUESTION_PROMPT
 from app.graph.state import AnalysisState
+from app.intent.answerability import detect_answerability_issue
+from app.intent.filter_resolver import resolve_value_filters
+from app.llm.provider import create_chat_model, current_provider_config
 from app.settings import settings
 from app.tools.chart_tool import build_charts
 from app.tools.dataset_reader import read_dataframe
@@ -37,7 +54,6 @@ from app.tools.duckdb_tool import (
 from app.tools.pandas_tool import run_pandas_operation
 from app.tools.report_tool import markdown_table
 from app.tools.serialization import dataframe_to_records
-
 
 ANSWERABILITY_REASON_FILTER = "__answerability_reason"
 ANSWERABILITY_SUGGESTION_FILTER = "__answerability_suggestion"
@@ -68,29 +84,21 @@ def profile_dataset(state: AnalysisState) -> dict[str, Any]:
 
 def understand_question(state: AnalysisState) -> dict[str, Any]:
     profile = DatasetProfile.model_validate(state["profile"])
-    understanding = _try_llm_understanding(state["user_question"], profile) or _rule_based_understanding(
-        state["user_question"],
-        profile,
-    )
-    return {
+    llm_result = _try_llm_understanding(state["user_question"], profile)
+    if llm_result:
+        understanding, llm_usage = llm_result
+    else:
+        understanding = _rule_based_understanding(state["user_question"], profile)
+        llm_usage = None
+    update: dict[str, Any] = {
         "current_step": "understand_question",
         "question_understanding": understanding.model_dump(mode="json"),
         "needs_clarification": understanding.needs_clarification,
         "messages": _append_message(state, "assistant", f"已识别分析目标：{_goal_label(understanding.analysis_goal)}。"),
     }
-
-
-def plan_analysis(state: AnalysisState) -> dict[str, Any]:
-    profile = DatasetProfile.model_validate(state["profile"])
-    understanding = QuestionUnderstanding.model_validate(state["question_understanding"])
-    plan = _build_plan(state["user_question"], profile, understanding)
-    sub_questions = _split_compound_questions(state["user_question"]) if len(plan.operations) > 1 else []
-    return {
-        "current_step": "plan_analysis",
-        "analysis_plan": plan.model_dump(mode="json"),
-        "sub_questions": sub_questions,
-        "messages": _append_message(state, "assistant", f"已规划 {len(plan.operations)} 个分析操作。"),
-    }
+    if llm_usage:
+        update["llm_usage"] = llm_usage
+    return update
 
 
 def choose_execution_path(state: AnalysisState) -> dict[str, Any]:
@@ -338,193 +346,45 @@ def generate_charts(state: AnalysisState) -> dict[str, Any]:
     }
 
 
-def generate_insights(state: AnalysisState) -> dict[str, Any]:
-    result = ExecutionResult.model_validate(state["execution_result"])
-    insights = _derive_insights(result)
-    return {
-        "current_step": "generate_insights",
-        "insights": [insight.model_dump(mode="json") for insight in insights],
-        "messages": _append_message(state, "assistant", f"已生成 {len(insights)} 条有证据支撑的洞察。"),
-    }
-
-
-def review_answer(state: AnalysisState) -> dict[str, Any]:
-    profile = DatasetProfile.model_validate(state["profile"])
-    insights = [Insight.model_validate(item) for item in state.get("insights", [])]
-    notes: list[ReviewNote] = []
-    question = state.get("user_question", "")
-    if not insights:
-        notes.append(ReviewNote(severity="warning", note="未生成可被结果支撑的洞察。", evidence="execution_result"))
-
-    high_missing = [column.name for column in profile.columns if column.missing_rate >= 0.2]
-    if high_missing:
-        notes.append(
-            ReviewNote(
-                severity="warning",
-                note=f"以下字段缺失率不低于 20%，可能影响解读：{', '.join(high_missing)}。",
-                evidence="dataset_profile",
-            )
-        )
-
-    column_names = [column.name for column in profile.columns]
-    if any("订单状态" in column or "status" in column.lower() for column in column_names):
-        if any(keyword in question.lower() for keyword in ["销售额", "利润", "sales", "profit", "订单"]) and "已完成" not in question:
-            notes.append(
-                ReviewNote(
-                    severity="warning",
-                    note="数据中存在订单状态字段，当前问题未明确是否只看已完成订单；报告结论应说明是否包含取消、退货或处理中订单。",
-                    evidence="dataset_profile",
-                )
-            )
-
-    if any("mrr" in column.lower() for column in column_names):
-        notes.append(
-            ReviewNote(
-                severity="info",
-                note="MRR 通常是月度快照指标；当前 MRR 应优先取最新月份，跨月全表求和只能解释为客户-月份累计记录求和。",
-                evidence="metric_registry",
-            )
-        )
-
-    if state.get("sub_questions") and state.get("execution_result"):
-        result = ExecutionResult.model_validate(state["execution_result"])
-        if result.kind == "multi_analysis":
-            expected = len(state.get("sub_questions") or [])
-            actual = int(result.metrics.get("sub_result_count") or 0)
-            if actual < expected:
-                notes.append(
-                    ReviewNote(
-                        severity="warning",
-                        note=f"复合问题包含 {expected} 个子问题，但当前只生成 {actual} 个子结果；需要检查是否存在漏答。",
-                        evidence="multi_analysis.sub_result_count",
-                    )
-                )
-
-    reviewed_insights = [insight for insight in insights if insight.evidence]
-    return {
-        "current_step": "review_answer",
-        "insights": [insight.model_dump(mode="json") for insight in reviewed_insights],
-        "review_notes": [note.model_dump(mode="json") for note in notes],
-        "messages": _append_message(state, "assistant", "已复核证据链和数据质量风险。"),
-    }
-
-
-def generate_report(state: AnalysisState) -> dict[str, Any]:
-    report = _build_report(state)
-    return {
-        "current_step": "generate_report",
-        "report_markdown": report,
-        "messages": _append_message(state, "assistant", "已生成 Markdown 分析报告。"),
-    }
-
-
 def _append_message(state: AnalysisState, role: str, content: str) -> list[dict[str, str]]:
     return [*(state.get("messages") or []), {"role": role, "content": content}]
 
 
-def _goal_label(goal: str) -> str:
-    labels = {
-        "group_aggregate": "分组聚合",
-        "count_by_dimension": "维度计数",
-        "time_trend": "时间趋势",
-        "correlation": "相关性分析",
-        "distribution": "分布分析",
-        "outlier": "异常值检测",
-        "top_records": "Top 记录查询",
-        "market_recommendation": "市场扩张建议",
-        "dataset_overview": "数据集概览",
-        "data_quality": "数据质量审计",
-        "mrr_snapshot_vs_cumulative": "MRR 口径区分",
-        "risk_customer_ranking": "高风险客户排名",
-        "business_template_analysis": "业务模板分析",
-        "multi_analysis": "多问题综合分析",
-        "describe": "描述统计",
-        "unanswerable": "当前数据不可回答",
-        "unanswerable_with_current_schema": "当前数据不可回答",
-        "clarification": "需要澄清",
-    }
-    return labels.get(goal, goal)
-
-
-def _path_label(path: str) -> str:
-    labels = {
-        "duckdb_sql": "DuckDB SQL",
-        "pandas": "pandas/scipy",
-        "clarification": "追问澄清",
-    }
-    return labels.get(path, path)
-
-
-def _operation_label(operation: str) -> str:
-    return _goal_label(operation)
-
-
-def _table_label(table_name: str) -> str:
-    prefixed = re.match(r"q(\d+)_(.+)", table_name)
-    if prefixed:
-        return f"问题 {prefixed.group(1)} - {_table_label(prefixed.group(2))}"
-    labels = {
-        "group_aggregate": "分组聚合结果",
-        "count_by_dimension": "维度计数结果",
-        "time_trend": "时间趋势结果",
-        "correlation_sample": "相关性样本",
-        "histogram_bins": "分布区间",
-        "outlier_rows": "异常值记录",
-        "top_records": "Top 记录结果",
-        "market_recommendation": "市场扩张建议结果",
-        "dataset_overview": "数据集概览",
-        "data_quality_issues": "数据质量问题",
-        "data_quality_detail_rows": "质量问题明细行",
-        "mrr_scope_comparison": "MRR 口径对比",
-        "monthly_mrr": "月度 MRR",
-        "risk_customer_ranking": "高风险客户 MRR 排名",
-        "risk_customer_summary": "风险客户汇总",
-        "payment_renewal_summary": "账款与续约风险汇总",
-        "payment_collection_priority": "催收优先级明细",
-        "customer_success_priority": "客户成功优先级",
-        "channel_performance_risk": "渠道表现与风险",
-        "industry_market_selection": "行业市场选择",
-        "segment_plan_strategy": "分层与套餐策略",
-        "expansion_contraction_summary": "扩张收缩汇总",
-        "expansion_contraction_top_expansion": "Top 扩张客户",
-        "expansion_contraction_top_contraction": "Top 收缩客户",
-        "expansion_contraction_customers": "扩张收缩客户明细",
-        "health_signal_correlations": "健康信号相关性",
-        "pipeline_summary": "Pipeline 汇总",
-        "pipeline_by_owner": "销售负责人 Pipeline",
-        "pipeline_by_stage": "销售阶段 Pipeline",
-        "pipeline_by_type": "商机类型 Pipeline",
-        "sales_overview_status": "经营总览口径对比",
-        "order_status_impact": "订单状态影响",
-        "product_pareto": "商品 Pareto 贡献",
-        "discount_profit_by_rate": "折扣率与利润率",
-        "discount_profit_anomalies": "异常折扣订单",
-        "payment_mix": "支付方式结构",
-        "sales_channel_strategy": "销售渠道策略",
-        "numeric_describe": "数值描述统计",
-        "unanswerable_questions": "不可回答问题说明",
-    }
-    return labels.get(table_name, table_name)
-
-
-def _try_llm_understanding(question: str, profile: DatasetProfile) -> QuestionUnderstanding | None:
+def _try_llm_understanding(question: str, profile: DatasetProfile) -> tuple[QuestionUnderstanding, dict[str, Any]] | None:
     if not settings.use_llm:
         return None
     try:
-        from langchain_openai import ChatOpenAI
-
         prompt = UNDERSTAND_QUESTION_PROMPT.format(
             question=question,
             profile=profile.model_dump(mode="json"),
         )
-        model_name = os.getenv("OPENAI_MODEL", settings.openai_model)
-        model = ChatOpenAI(model=model_name, temperature=0).with_structured_output(QuestionUnderstanding)
+        provider = current_provider_config()
+        model = create_chat_model(temperature=0).with_structured_output(
+            QuestionUnderstanding,
+            include_raw=True,
+        )
         result = model.invoke(prompt)
-        if isinstance(result, QuestionUnderstanding):
-            return _sanitize_understanding(result, profile)
-        return _sanitize_understanding(QuestionUnderstanding.model_validate(result), profile)
+        parsed = result.get("parsed") if isinstance(result, dict) else result
+        raw = result.get("raw") if isinstance(result, dict) else None
+        understanding = parsed if isinstance(parsed, QuestionUnderstanding) else QuestionUnderstanding.model_validate(parsed)
+        usage = _provider_usage(raw, provider.model)
+        return _sanitize_understanding(understanding, profile), usage
     except Exception:
         return None
+
+
+def _provider_usage(raw: Any, model_name: str) -> dict[str, Any]:
+    usage_metadata = getattr(raw, "usage_metadata", None) or {}
+    response_metadata = getattr(raw, "response_metadata", None) or {}
+    token_usage = response_metadata.get("token_usage") or response_metadata.get("usage") or {}
+    prompt_tokens = usage_metadata.get("input_tokens") or token_usage.get("prompt_tokens") or token_usage.get("input_tokens") or 0
+    completion_tokens = usage_metadata.get("output_tokens") or token_usage.get("completion_tokens") or token_usage.get("output_tokens") or 0
+    return {
+        "source": "provider",
+        "model_name": response_metadata.get("model_name") or model_name,
+        "prompt_tokens": int(prompt_tokens),
+        "completion_tokens": int(completion_tokens),
+    }
 
 
 def _rule_based_understanding(question: str, profile: DatasetProfile) -> QuestionUnderstanding:
@@ -542,6 +402,9 @@ def _rule_based_understanding(question: str, profile: DatasetProfile) -> Questio
     month = _extract_month_number(question)
     if month:
         filters.append(f"__month__={month}")
+
+    if goal == "describe" and filters and any(keyword in question.lower() for keyword in ["总", "合计", "sum", "total"]):
+        goal = "group_aggregate"
 
     answerability_issue = _answerability_issue(question, profile, goal, filters)
     if answerability_issue:
@@ -585,7 +448,12 @@ def _rule_based_understanding(question: str, profile: DatasetProfile) -> Questio
             metrics = [_choose_metric(question, profile) or profile.numeric_columns[0]]
 
     if goal in {"group_aggregate", "count_by_dimension", "top_records"} and not dimensions and profile.categorical_columns:
-        dimensions = [_choose_entity_dimension(question, profile) or profile.categorical_columns[0]]
+        filter_dimensions = [
+            item.split("=", 1)[0]
+            for item in filters
+            if "=" in item and not item.startswith("__") and item.split("=", 1)[0] in profile.categorical_columns
+        ]
+        dimensions = [filter_dimensions[0] if filter_dimensions else (_choose_entity_dimension(question, profile) or profile.categorical_columns[0])]
     if goal == "dataset_overview" and not time_field and profile.datetime_columns:
         time_field = profile.datetime_columns[0]
     if goal == "time_trend" and not time_field and profile.datetime_columns:
@@ -621,6 +489,12 @@ def _rule_based_understanding(question: str, profile: DatasetProfile) -> Questio
 
 
 def _answerability_issue(question: str, profile: DatasetProfile, goal: str, filters: list[str]) -> dict[str, str] | None:
+    general_issue = detect_answerability_issue(question)
+    if general_issue:
+        return {
+            "reason": general_issue.reason,
+            "suggestion": general_issue.suggestion,
+        }
     if goal == "top_records" and _question_requests_product_name(question) and not _has_product_name_dimension(profile):
         metric = _choose_metric(question, profile)
         metric_text = f"；已识别到指标 `{metric}`" if metric else ""
@@ -872,26 +746,6 @@ def _infer_business_template(question: str, profile: DatasetProfile) -> str | No
     return None
 
 
-def _business_template_label(template_id: str | None) -> str:
-    labels = {
-        "payment_renewal_risk": "账款与续约风险联动",
-        "customer_success_priority": "客户成功优先级",
-        "channel_performance_risk": "渠道表现与风险",
-        "industry_market_selection": "行业市场选择",
-        "segment_plan_strategy": "分层与套餐策略",
-        "expansion_contraction": "MRR 扩张收缩",
-        "health_signal_analysis": "客户健康信号",
-        "pipeline_summary": "Pipeline 汇总",
-        "sales_overview_status": "经营总览口径",
-        "order_status_impact": "订单状态影响",
-        "product_pareto": "商品 Pareto 贡献",
-        "discount_profit_sensitivity": "折扣与利润敏感性",
-        "payment_mix": "支付方式结构",
-        "sales_channel_strategy": "销售渠道策略",
-    }
-    return labels.get(template_id or "", template_id or "业务模板")
-
-
 def _infer_aggregation(question: str, goal: str) -> str:
     q = question.lower()
     if goal == "count_by_dimension" or any(keyword in q for keyword in ["数量", "个数", "count", "多少"]):
@@ -1007,14 +861,7 @@ def _choose_market_metrics(profile: DatasetProfile) -> list[str]:
 
 
 def _infer_value_filters(question: str, profile: DatasetProfile) -> list[str]:
-    filters: list[str] = []
-    geo_column = _choose_geo_column(profile)
-    if not geo_column:
-        return filters
-    city = _extract_city_value(question)
-    if city:
-        filters.append(f"{geo_column}={city}")
-    return filters
+    return resolve_value_filters(question, profile)
 
 
 def _choose_geo_column(profile: DatasetProfile) -> str | None:

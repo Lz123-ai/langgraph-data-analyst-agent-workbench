@@ -17,6 +17,7 @@ The script:
 - checks execution path, result type, key rows, metrics, and report keywords
 - writes a JSON report under `agent_eval/results/`
 - exits with code `1` if any case fails
+- includes unsupported prediction, causality, out-of-domain, and profiled-value filter regressions
 
 ## Add More Cases
 

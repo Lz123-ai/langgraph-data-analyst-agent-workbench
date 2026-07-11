@@ -5,7 +5,6 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-
 LogicalType = Literal["numeric", "categorical", "datetime", "boolean", "text", "unknown"]
 ExecutionPath = Literal["duckdb_sql", "pandas", "clarification"]
 
@@ -21,6 +20,8 @@ class DatasetMetadata(BaseModel):
     column_count: int
     columns: list[str]
     created_at: datetime
+    tenant_id: str = "local"
+    user_id: str = "local-user"
 
 
 class ColumnProfile(BaseModel):

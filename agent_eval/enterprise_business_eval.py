@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import Any
 from zipfile import ZipFile
 
-
 ROOT = Path(__file__).resolve().parents[1]
 BACKEND_DIR = ROOT / "backend"
 if str(BACKEND_DIR) not in sys.path:
@@ -17,7 +16,6 @@ if str(BACKEND_DIR) not in sys.path:
 
 from app.graph.workflow import build_analysis_workflow  # noqa: E402
 from app.settings import settings  # noqa: E402
-
 
 DATASET_NAME = "enterprise_agent_eval_dataset_20260703_221458"
 

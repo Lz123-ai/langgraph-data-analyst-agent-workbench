@@ -5,7 +5,6 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-
 OpsTaskStatus = Literal["queued", "running", "succeeded", "failed", "cancelled"]
 TraceStatus = Literal["running", "succeeded", "failed"]
 SpanType = Literal["task", "node", "tool", "llm", "system"]
@@ -72,6 +71,18 @@ class TokenUsageRecord(BaseModel):
     created_at: datetime
 
 
+class NodePayloadMetricRecord(BaseModel):
+    metric_id: str
+    trace_id: str
+    task_id: str
+    node: str
+    input_chars: int
+    output_chars: int
+    output_bytes: int
+    output_rows: int = 0
+    created_at: datetime
+
+
 class EvalRunRecord(BaseModel):
     eval_run_id: str
     status: Literal["succeeded", "failed"]
@@ -90,6 +101,7 @@ class AgentOpsSummary(BaseModel):
     failed_count: int
     total_tokens: int
     estimated_cost_usd: float
+    deterministic_payload_bytes: int = 0
     latest_eval: EvalRunRecord | None = None
 
 
@@ -101,6 +113,7 @@ class AgentTaskDetailResponse(BaseModel):
     task: AgentTaskRecord
     trace: list[TraceSpanRecord]
     token_usage: list[TokenUsageRecord]
+    payload_metrics: list[NodePayloadMetricRecord] = Field(default_factory=list)
 
 
 class TraceListResponse(BaseModel):
@@ -113,3 +126,18 @@ class TokenUsageListResponse(BaseModel):
 
 class EvalRunListResponse(BaseModel):
     eval_runs: list[EvalRunRecord]
+
+
+class ModelRuntimeStatusResponse(BaseModel):
+    enabled: bool
+    provider: str
+    model: str
+    base_url_configured: bool
+    api_key_configured: bool
+    configuration_error: str | None = None
+
+
+class ModelSmokeTestResponse(BaseModel):
+    ok: bool
+    provider: str
+    model: str

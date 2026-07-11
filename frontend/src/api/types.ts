@@ -9,6 +9,8 @@ export interface DatasetMetadata {
   column_count: number
   columns: string[]
   created_at: string
+  tenant_id: string
+  user_id: string
 }
 
 export interface ColumnProfile {
@@ -87,6 +89,7 @@ export interface ChartArtifact {
 }
 
 export interface TaskEvent {
+  sequence_id?: number | null
   event_id: string
   task_id: string
   event_type: string
@@ -98,6 +101,11 @@ export interface TaskEvent {
 }
 
 export interface AnalysisTaskResponse {
+  task_id: string
+  status: string
+}
+
+export interface AnalysisCancelResponse {
   task_id: string
   status: string
 }
@@ -183,6 +191,18 @@ export interface TokenUsageRecord {
   created_at: string
 }
 
+export interface NodePayloadMetricRecord {
+  metric_id: string
+  trace_id: string
+  task_id: string
+  node: string
+  input_chars: number
+  output_chars: number
+  output_bytes: number
+  output_rows: number
+  created_at: string
+}
+
 export interface EvalRunRecord {
   eval_run_id: string
   status: string
@@ -201,6 +221,7 @@ export interface AgentOpsSummary {
   failed_count: number
   total_tokens: number
   estimated_cost_usd: number
+  deterministic_payload_bytes: number
   latest_eval?: EvalRunRecord | null
 }
 
@@ -212,6 +233,7 @@ export interface AgentTaskDetailResponse {
   task: AgentTaskRecord
   trace: TraceSpanRecord[]
   token_usage: TokenUsageRecord[]
+  payload_metrics: NodePayloadMetricRecord[]
 }
 
 export interface EvalRunListResponse {

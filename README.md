@@ -1,6 +1,15 @@
 # LangGraph Data Analyst Agent Workbench
 
-Portfolio-grade data analysis Agent workbench built with LangGraph, FastAPI, Vue 3, TypeScript, DuckDB, pandas, scipy, ECharts, and SSE.
+Local-first, schema-grounded data analysis Agent workbench built with LangGraph, FastAPI, Vue 3, TypeScript, DuckDB, pandas, scipy, ECharts, and replayable SSE.
+
+> **Project boundary:** this repository defaults to a trusted local user and reproducible Agent engineering demonstrations. It does not claim that correlation proves causality, does not silently turn forecasting requests into descriptive statistics, and does not access external knowledge. Shared deployments can use a shared token guard or verified OIDC/JWT identities with tenant/user resource ownership.
+
+## What It Is — And Is Not
+
+- It is a safe tabular analysis workbench with validated plans, fixed execution tools, evidence-linked reports, durable task events, and deterministic regression evaluation.
+- It explicitly returns `unanswerable` when a request is out of domain, predictive, causal, unsafe, or unsupported by the uploaded schema.
+- It is not an arbitrary Python/SQL execution environment, forecasting platform, causal inference engine, or autonomous web research agent.
+- The default mode is single-user and local-first. In `AUTH_MODE=oidc`, tenant/user claims are verified and enforced for datasets, analysis tasks, SSE, and AgentOps resources.
 
 ## What This MVP Shows
 
@@ -13,7 +22,7 @@ Portfolio-grade data analysis Agent workbench built with LangGraph, FastAPI, Vue
 - SSE task stream for frontend timeline updates.
 - Traceable Markdown report with SQL/code trace, result tables, chart references, and risk notes.
 - Improvement log for recording real usage issues, fixes, status, dataset context, and related analysis questions.
-- AgentOps foundation: persistent task records, trace spans, token/cost accounting, tenant/user labels, evaluation runs, and failure-to-improvement-log loop.
+- AgentOps foundation: persistent task records, trace spans, provider-reported token usage, deterministic payload metrics, verified ownership labels, evaluation runs, and failure-to-improvement-log loop.
 
 ## Architecture
 
@@ -27,7 +36,7 @@ FastAPI routers
         |
         v
 services + runtime
-  SQLite metadata   improvement logs   agent task/trace/token/eval records   in-memory SSE queue
+  SQLite metadata   improvement logs   durable task/event/trace/usage/eval records
         |
         v
 LangGraph workflow
@@ -115,14 +124,14 @@ npm run build
 
 Current validation:
 
-- Backend tests: `26 passed`
-- Agent batch evaluation: `14 passed`
+- Backend tests: `49 passed`
+- Agent batch evaluation: `18 passed`
 - Enterprise business evaluation: `8/8 passed`
-- Frontend build: passed
+- Frontend unit test, Playwright upload-to-report E2E, and production build: passed
 
 ## AgentOps Foundation
 
-- `GET /api/ops/summary`: task counts, token total, estimated cost, latest evaluation run.
+- `GET /api/ops/summary`: task counts, provider-reported token/cost totals, deterministic payload size, and latest evaluation run.
 - `GET /api/ops/tasks`: persisted analysis tasks with `tenant_id`, `user_id`, `trace_id`, status, token budget, and final state.
 - `GET /api/ops/tasks/{task_id}`: task detail with trace spans and token usage records.
 - `GET /api/ops/eval-runs`: stored batch evaluation reports.
@@ -153,10 +162,24 @@ Use `AGENT_HANDOFF.md` when handing this project to another testing Agent. The p
 ## Open Source Notes
 
 - Do not commit real `.env` files, uploaded datasets, SQLite runtime data, logs, generated handoff zips, or personal documents.
-- `.env.example` is safe to commit and keeps `USE_LLM=false` by default, so local tests do not consume OpenAI tokens.
+- `.env.example` is safe to commit and keeps `USE_LLM=false` by default, so local tests do not consume model tokens.
+- Treat a key pasted into chat, an issue, or a commit as compromised: revoke it at the provider and put its replacement only in the ignored `.env` file or a deployment secret store.
 - Sample and evaluation CSV files in `samples/` and `agent_eval/fixtures/` are synthetic demo data.
 - Large or private evaluation datasets should be distributed outside the repository, for example through a separate release artifact or private handoff package.
 
 ## License
 
 MIT.
+
+## Open Source Project Docs
+
+- `docs/architecture.md`: runtime, trust boundaries, and extension points.
+- `docs/evaluation.md`: layered Agent evaluation strategy.
+- `docs/model_providers.md`: OpenAI, OpenAI-compatible, and Ollama configuration.
+- `docs/llm_verification.md`: safe live-provider smoke-test workflow.
+- `docs/authentication.md`: local, shared token, and OIDC/JWT modes.
+- `docs/threat_model.md`: threats, mitigations, and accepted local-first risks.
+- `docs/production_readiness.md`: deployment guardrails, metrics, limits, and the required scaling boundary.
+- `CONTRIBUTING.md`: development and regression workflow.
+- `SECURITY.md`: supported security boundary and reporting.
+- `CHANGELOG.md`: user-visible changes.

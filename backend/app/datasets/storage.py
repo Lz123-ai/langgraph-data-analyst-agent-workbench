@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 
 from app.domain import DatasetMetadata, DatasetProfile
@@ -28,10 +29,17 @@ class DatasetStorage:
                     column_count INTEGER NOT NULL,
                     columns_json TEXT NOT NULL,
                     profile_json TEXT NOT NULL,
-                    created_at TEXT NOT NULL
+                    created_at TEXT NOT NULL,
+                    tenant_id TEXT NOT NULL DEFAULT 'local',
+                    user_id TEXT NOT NULL DEFAULT 'local-user'
                 )
                 """
             )
+            existing_columns = {row["name"] for row in conn.execute("PRAGMA table_info(datasets)").fetchall()}
+            if "tenant_id" not in existing_columns:
+                conn.execute("ALTER TABLE datasets ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'local'")
+            if "user_id" not in existing_columns:
+                conn.execute("ALTER TABLE datasets ADD COLUMN user_id TEXT NOT NULL DEFAULT 'local-user'")
 
     def add_dataset(self, metadata: DatasetMetadata, profile: DatasetProfile) -> None:
         with self._connect() as conn:
@@ -39,8 +47,9 @@ class DatasetStorage:
                 """
                 INSERT INTO datasets (
                     dataset_id, original_filename, stored_filename, file_path, file_type,
-                    size_bytes, row_count, column_count, columns_json, profile_json, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    size_bytes, row_count, column_count, columns_json, profile_json, created_at,
+                    tenant_id, user_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     metadata.dataset_id,
@@ -54,6 +63,8 @@ class DatasetStorage:
                     json.dumps(metadata.columns),
                     profile.model_dump_json(),
                     metadata.created_at.isoformat(),
+                    metadata.tenant_id,
+                    metadata.user_id,
                 ),
             )
 
@@ -64,14 +75,38 @@ class DatasetStorage:
             return None
         return self._row_to_models(row)
 
-    def list_datasets(self) -> list[DatasetMetadata]:
+    def list_datasets(self, tenant_id: str | None = None, user_id: str | None = None) -> list[DatasetMetadata]:
+        clauses: list[str] = []
+        params: list[str] = []
+        if tenant_id:
+            clauses.append("tenant_id = ?")
+            params.append(tenant_id)
+        if user_id:
+            clauses.append("user_id = ?")
+            params.append(user_id)
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         with self._connect() as conn:
-            rows = conn.execute("SELECT * FROM datasets ORDER BY created_at DESC").fetchall()
+            rows = conn.execute(f"SELECT * FROM datasets {where} ORDER BY created_at DESC", params).fetchall()
+        return [self._row_to_models(row)[0] for row in rows]
+
+    def delete_dataset(self, dataset_id: str) -> bool:
+        with self._connect() as conn:
+            cursor = conn.execute("DELETE FROM datasets WHERE dataset_id = ?", (dataset_id,))
+        return cursor.rowcount > 0
+
+    def list_expired(self, older_than: datetime) -> list[DatasetMetadata]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM datasets WHERE created_at < ? ORDER BY created_at ASC",
+                (older_than.astimezone(timezone.utc).isoformat(),),
+            ).fetchall()
         return [self._row_to_models(row)[0] for row in rows]
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=10)
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=10000")
         return conn
 
     def _row_to_models(self, row: sqlite3.Row) -> tuple[DatasetMetadata, DatasetProfile]:
@@ -86,6 +121,8 @@ class DatasetStorage:
             column_count=row["column_count"],
             columns=json.loads(row["columns_json"]),
             created_at=row["created_at"],
+            tenant_id=row["tenant_id"],
+            user_id=row["user_id"],
         )
         profile = DatasetProfile.model_validate_json(row["profile_json"])
         return metadata, profile

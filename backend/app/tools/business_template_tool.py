@@ -5,42 +5,17 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from app.business.template_registry import BusinessTemplateRegistry
 from app.domain import AnalysisOperation, ExecutionResult, ExecutionTable
-from app.tools.serialization import dataframe_to_records, to_jsonable
+from app.tools.serialization import dataframe_to_records
 from app.tools.time_scope import latest_complete_period, period_filters, start_end_period_filters
+
+template_registry = BusinessTemplateRegistry()
 
 
 def run_business_template(df: pd.DataFrame, operation: AnalysisOperation) -> tuple[ExecutionResult, str]:
     template_id = operation.template_id or _template_from_filters(operation.filters)
-    if template_id == "payment_renewal_risk":
-        return _payment_renewal_risk(df, operation)
-    if template_id == "customer_success_priority":
-        return _customer_success_priority(df, operation)
-    if template_id == "channel_performance_risk":
-        return _channel_performance_risk(df, operation)
-    if template_id == "industry_market_selection":
-        return _industry_market_selection(df, operation)
-    if template_id == "segment_plan_strategy":
-        return _segment_plan_strategy(df, operation)
-    if template_id == "expansion_contraction":
-        return _expansion_contraction(df, operation)
-    if template_id == "health_signal_analysis":
-        return _health_signal_analysis(df, operation)
-    if template_id == "sales_overview_status":
-        return _sales_overview_status(df, operation)
-    if template_id == "order_status_impact":
-        return _order_status_impact(df, operation)
-    if template_id == "product_pareto":
-        return _product_pareto(df, operation)
-    if template_id == "discount_profit_sensitivity":
-        return _discount_profit_sensitivity(df, operation)
-    if template_id == "payment_mix":
-        return _payment_mix(df, operation)
-    if template_id == "sales_channel_strategy":
-        return _sales_channel_strategy(df, operation)
-    if template_id == "pipeline_summary":
-        return _pipeline_summary(df, operation)
-    raise ValueError(f"未支持的业务分析模板：{template_id}")
+    return template_registry.execute(template_id, df, operation)
 
 
 def _payment_renewal_risk(df: pd.DataFrame, operation: AnalysisOperation) -> tuple[ExecutionResult, str]:
@@ -793,3 +768,27 @@ def _risk_mask(series: pd.Series, include_medium: bool) -> pd.Series:
 
 def _yes_mask(series: pd.Series) -> pd.Series:
     return series.astype(str).str.contains("是|yes|true|1|流失|churn", case=False, regex=True, na=False)
+
+
+def _register_templates() -> None:
+    handlers = {
+        "payment_renewal_risk": (_payment_renewal_risk, "账款与续约风险联动"),
+        "customer_success_priority": (_customer_success_priority, "客户成功优先级"),
+        "channel_performance_risk": (_channel_performance_risk, "渠道表现与风险"),
+        "industry_market_selection": (_industry_market_selection, "行业市场选择"),
+        "segment_plan_strategy": (_segment_plan_strategy, "分层与套餐策略"),
+        "expansion_contraction": (_expansion_contraction, "MRR 扩张收缩"),
+        "health_signal_analysis": (_health_signal_analysis, "客户健康信号"),
+        "sales_overview_status": (_sales_overview_status, "经营总览口径"),
+        "order_status_impact": (_order_status_impact, "订单状态影响"),
+        "product_pareto": (_product_pareto, "商品 Pareto 贡献"),
+        "discount_profit_sensitivity": (_discount_profit_sensitivity, "折扣与利润敏感性"),
+        "payment_mix": (_payment_mix, "支付方式结构"),
+        "sales_channel_strategy": (_sales_channel_strategy, "销售渠道策略"),
+        "pipeline_summary": (_pipeline_summary, "Pipeline 汇总"),
+    }
+    for template_id, (handler, description) in handlers.items():
+        template_registry.register(template_id, handler, description)
+
+
+_register_templates()

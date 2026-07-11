@@ -18,6 +18,8 @@ class ImprovementLogStorage:
                 """
                 CREATE TABLE IF NOT EXISTS improvement_logs (
                     log_id TEXT PRIMARY KEY,
+                    tenant_id TEXT NOT NULL DEFAULT 'system',
+                    user_id TEXT NOT NULL DEFAULT 'system',
                     issue TEXT NOT NULL,
                     resolution TEXT NOT NULL,
                     status TEXT NOT NULL,
@@ -28,18 +30,27 @@ class ImprovementLogStorage:
                 )
                 """
             )
+            columns = {row["name"] for row in conn.execute("PRAGMA table_info(improvement_logs)").fetchall()}
+            if "tenant_id" not in columns:
+                conn.execute("ALTER TABLE improvement_logs ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'system'")
+            if "user_id" not in columns:
+                conn.execute("ALTER TABLE improvement_logs ADD COLUMN user_id TEXT NOT NULL DEFAULT 'system'")
+            conn.execute("UPDATE improvement_logs SET tenant_id = COALESCE(NULLIF(tenant_id, ''), 'system')")
+            conn.execute("UPDATE improvement_logs SET user_id = COALESCE(NULLIF(user_id, ''), 'system')")
 
     def add_log(self, entry: ImprovementLogEntry) -> None:
         with self._connect() as conn:
             conn.execute(
                 """
                 INSERT INTO improvement_logs (
-                    log_id, issue, resolution, status, dataset_id,
+                    log_id, tenant_id, user_id, issue, resolution, status, dataset_id,
                     related_question, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     entry.log_id,
+                    entry.tenant_id,
+                    entry.user_id,
                     entry.issue,
                     entry.resolution,
                     entry.status,
@@ -67,7 +78,9 @@ class ImprovementLogStorage:
             conn.execute(
                 """
                 UPDATE improvement_logs
-                SET issue = ?,
+                SET tenant_id = ?,
+                    user_id = ?,
+                    issue = ?,
                     resolution = ?,
                     status = ?,
                     dataset_id = ?,
@@ -76,6 +89,8 @@ class ImprovementLogStorage:
                 WHERE log_id = ?
                 """,
                 (
+                    entry.tenant_id,
+                    entry.user_id,
                     entry.issue,
                     entry.resolution,
                     entry.status,
@@ -91,7 +106,9 @@ class ImprovementLogStorage:
             conn.execute(
                 """
                 UPDATE improvement_logs
-                SET issue = ?,
+                SET tenant_id = ?,
+                    user_id = ?,
+                    issue = ?,
                     resolution = ?,
                     status = ?,
                     dataset_id = ?,
@@ -100,6 +117,8 @@ class ImprovementLogStorage:
                 WHERE log_id = ?
                 """,
                 (
+                    entry.tenant_id,
+                    entry.user_id,
                     entry.issue,
                     entry.resolution,
                     entry.status,
@@ -110,11 +129,16 @@ class ImprovementLogStorage:
                 ),
             )
 
-    def list_logs(self, limit: int = 50) -> list[ImprovementLogEntry]:
+    def list_logs(self, *, tenant_id: str, user_id: str, limit: int = 50) -> list[ImprovementLogEntry]:
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT * FROM improvement_logs ORDER BY created_at DESC LIMIT ?",
-                (limit,),
+                """
+                SELECT * FROM improvement_logs
+                WHERE (tenant_id = ? AND user_id = ?)
+                   OR (tenant_id = 'system' AND user_id = 'system')
+                ORDER BY created_at DESC LIMIT ?
+                """,
+                (tenant_id, user_id, limit),
             ).fetchall()
         return [self._row_to_model(row) for row in rows]
 
@@ -130,6 +154,8 @@ class ImprovementLogStorage:
     def _row_to_model(self, row: sqlite3.Row) -> ImprovementLogEntry:
         return ImprovementLogEntry(
             log_id=row["log_id"],
+            tenant_id=row["tenant_id"],
+            user_id=row["user_id"],
             issue=row["issue"],
             resolution=row["resolution"],
             status=row["status"],

@@ -43,11 +43,16 @@ Open `http://127.0.0.1:8080/`.
 
 ```powershell
 .venv\Scripts\python.exe -m pytest -q
+.venv\Scripts\ruff.exe check backend\app agent_eval
+.venv\Scripts\coverage.exe run -m pytest -q
+.venv\Scripts\coverage.exe report
 .venv\Scripts\python.exe agent_eval\run_batch_eval.py
 .venv\Scripts\python.exe agent_eval\enterprise_business_eval.py
 
 cd frontend
 npm run build
+npm test
+npm run test:e2e
 cd ..
 ```
 

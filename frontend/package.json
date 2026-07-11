@@ -1,10 +1,12 @@
 {
   "name": "langgraph-data-analyst-workbench-frontend",
-  "version": "0.1.0",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 5173",
+    "test": "vitest run src",
+    "test:e2e": "playwright test",
     "build": "vue-tsc -b && vite build",
     "preview": "vite preview --host 127.0.0.1 --port 4173"
   },
@@ -16,9 +18,11 @@
     "vue": "^3.5.17"
   },
   "devDependencies": {
+    "@playwright/test": "^1.53.2",
     "@types/markdown-it": "^14.1.2",
     "typescript": "^5.8.3",
     "vite": "^7.0.0",
+    "vitest": "^3.2.4",
     "vue-tsc": "^3.0.1"
   }
 }

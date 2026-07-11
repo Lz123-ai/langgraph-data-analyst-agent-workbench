@@ -2,6 +2,8 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.coverage
+coverage.xml
 .mypy_cache/
 .ruff_cache/
 .env
@@ -13,12 +15,15 @@ output/
 tmp/
 .agents/
 backend/data/app.sqlite
+backend/data/app.sqlite-*
 backend/data/uploads/*
 !backend/data/uploads/.gitkeep
 frontend/node_modules/
 frontend/dist/
 frontend/.vite/
 frontend/tsconfig.tsbuildinfo
+frontend/test-results/
+frontend/playwright-report/
 npm-debug.log*
 pnpm-debug.log*
 backend-server*.log

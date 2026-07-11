@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
 
@@ -9,8 +9,15 @@ from fastapi import HTTPException, UploadFile
 from app.datasets.profiler import profile_dataframe
 from app.datasets.storage import DatasetStorage
 from app.domain import DatasetMetadata
+from app.ops.models import IdentityContext
 from app.settings import settings
-from app.tools.dataset_reader import SUPPORTED_EXTENSIONS, detect_file_type, preview_dataframe, read_dataframe
+from app.tools.dataset_reader import (
+    SUPPORTED_EXTENSIONS,
+    assert_upload_path,
+    detect_file_type,
+    preview_dataframe,
+    read_dataframe,
+)
 from app.tools.serialization import dataframe_to_records
 
 
@@ -18,7 +25,12 @@ class DatasetService:
     def __init__(self, storage: DatasetStorage) -> None:
         self.storage = storage
 
-    async def save_upload(self, upload: UploadFile) -> tuple[DatasetMetadata, object, list[dict]]:
+    async def save_upload(
+        self,
+        upload: UploadFile,
+        identity: IdentityContext | None = None,
+    ) -> tuple[DatasetMetadata, object, list[dict]]:
+        identity = identity or IdentityContext()
         settings.ensure_directories()
         original_filename = Path(upload.filename or "dataset.csv").name
         suffix = Path(original_filename).suffix.lower()
@@ -53,6 +65,8 @@ class DatasetService:
                 column_count=profile.column_count,
                 columns=[column.name for column in profile.columns],
                 created_at=datetime.now(timezone.utc),
+                tenant_id=identity.tenant_id,
+                user_id=identity.user_id,
             )
             self.storage.add_dataset(metadata, profile)
             preview = dataframe_to_records(df, limit=20)
@@ -64,19 +78,48 @@ class DatasetService:
             file_path.unlink(missing_ok=True)
             raise HTTPException(status_code=400, detail=f"Failed to process dataset: {exc}") from exc
 
-    def get_dataset(self, dataset_id: str):
+    def get_dataset(self, dataset_id: str, identity: IdentityContext | None = None):
         result = self.storage.get_dataset(dataset_id)
         if result is None:
             raise HTTPException(status_code=404, detail="Dataset not found.")
+        if identity:
+            metadata, _ = result
+            if metadata.tenant_id != identity.tenant_id or metadata.user_id != identity.user_id:
+                raise HTTPException(status_code=404, detail="Dataset not found.")
         return result
 
-    def list_datasets(self):
+    def list_datasets(self, identity: IdentityContext | None = None):
+        if identity:
+            return self.storage.list_datasets(identity.tenant_id, identity.user_id)
         return self.storage.list_datasets()
 
-    def preview(self, dataset_id: str, limit: int = 20):
-        metadata, _ = self.get_dataset(dataset_id)
+    def preview(self, dataset_id: str, limit: int = 20, identity: IdentityContext | None = None):
+        metadata, _ = self.get_dataset(dataset_id, identity)
         df = preview_dataframe(metadata.file_path, limit=limit)
         return metadata.columns, dataframe_to_records(df, limit=limit)
+
+    def delete_dataset(self, dataset_id: str, identity: IdentityContext | None = None) -> None:
+        metadata, _ = self.get_dataset(dataset_id, identity)
+        path = assert_upload_path(metadata.file_path)
+        if not self.storage.delete_dataset(dataset_id):
+            raise HTTPException(status_code=404, detail="Dataset not found.")
+        path.unlink(missing_ok=True)
+
+    def cleanup_expired(self, older_than_days: int) -> int:
+        if older_than_days <= 0:
+            return 0
+        cutoff = datetime.now(timezone.utc) - timedelta(days=older_than_days)
+        deleted = 0
+        for metadata in self.storage.list_expired(cutoff):
+            try:
+                path = assert_upload_path(metadata.file_path)
+                path.unlink(missing_ok=True)
+            except HTTPException as exc:
+                if exc.status_code != 404:
+                    continue
+            if self.storage.delete_dataset(metadata.dataset_id):
+                deleted += 1
+        return deleted
 
 
 dataset_service = DatasetService(DatasetStorage(settings.db_path))

@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from app.ops.models import AgentTaskRecord, EvalRunRecord, TokenUsageRecord, TraceSpanRecord
+from app.ops.models import AgentTaskRecord, EvalRunRecord, NodePayloadMetricRecord, TokenUsageRecord, TraceSpanRecord
 
 
 class AgentOpsStorage:
@@ -41,6 +41,21 @@ class AgentOpsStorage:
                     final_state_json TEXT,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS node_payload_metrics (
+                    metric_id TEXT PRIMARY KEY,
+                    trace_id TEXT NOT NULL,
+                    task_id TEXT NOT NULL,
+                    node TEXT NOT NULL,
+                    input_chars INTEGER NOT NULL,
+                    output_chars INTEGER NOT NULL,
+                    output_bytes INTEGER NOT NULL,
+                    output_rows INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL
                 )
                 """
             )
@@ -166,12 +181,21 @@ class AgentOpsStorage:
             row = conn.execute("SELECT * FROM agent_tasks WHERE task_id = ?", (task_id,)).fetchone()
         return self._row_to_task(row) if row else None
 
-    def list_tasks(self, limit: int = 50, tenant_id: str | None = None) -> list[AgentTaskRecord]:
+    def list_tasks(
+        self,
+        limit: int = 50,
+        tenant_id: str | None = None,
+        user_id: str | None = None,
+    ) -> list[AgentTaskRecord]:
         params: list[Any] = []
-        where = ""
+        clauses: list[str] = []
         if tenant_id:
-            where = "WHERE tenant_id = ?"
+            clauses.append("tenant_id = ?")
             params.append(tenant_id)
+        if user_id:
+            clauses.append("user_id = ?")
+            params.append(user_id)
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         params.append(limit)
         with self._connect() as conn:
             rows = conn.execute(
@@ -182,9 +206,27 @@ class AgentOpsStorage:
 
     def delete_task(self, task_id: str) -> None:
         with self._connect() as conn:
+            conn.execute("DELETE FROM node_payload_metrics WHERE task_id = ?", (task_id,))
             conn.execute("DELETE FROM token_usage WHERE task_id = ?", (task_id,))
             conn.execute("DELETE FROM agent_trace_spans WHERE task_id = ?", (task_id,))
             conn.execute("DELETE FROM agent_tasks WHERE task_id = ?", (task_id,))
+
+    def reset_task_for_retry(self, task_id: str) -> None:
+        with self._connect() as conn:
+            conn.execute("DELETE FROM token_usage WHERE task_id = ?", (task_id,))
+            conn.execute("DELETE FROM node_payload_metrics WHERE task_id = ?", (task_id,))
+            conn.execute("DELETE FROM agent_trace_spans WHERE task_id = ?", (task_id,))
+            conn.execute(
+                """
+                UPDATE agent_tasks
+                SET status = 'queued', prompt_tokens = 0, completion_tokens = 0,
+                    total_tokens = 0, estimated_cost_usd = 0, started_at = NULL,
+                    completed_at = NULL, duration_ms = NULL, error = NULL,
+                    final_state_json = NULL, updated_at = ?
+                WHERE task_id = ?
+                """,
+                (_dt(datetime.now().astimezone()), task_id),
+            )
 
     def add_trace_span(self, span: TraceSpanRecord) -> None:
         with self._connect() as conn:
@@ -248,6 +290,49 @@ class AgentOpsStorage:
                 ),
             )
 
+    def add_payload_metric(self, metric: NodePayloadMetricRecord) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO node_payload_metrics (
+                    metric_id, trace_id, task_id, node, input_chars, output_chars,
+                    output_bytes, output_rows, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    metric.metric_id,
+                    metric.trace_id,
+                    metric.task_id,
+                    metric.node,
+                    metric.input_chars,
+                    metric.output_chars,
+                    metric.output_bytes,
+                    metric.output_rows,
+                    _dt(metric.created_at),
+                ),
+            )
+
+    def list_payload_metrics(self, task_id: str) -> list[NodePayloadMetricRecord]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM node_payload_metrics WHERE task_id = ? ORDER BY created_at ASC",
+                (task_id,),
+            ).fetchall()
+        return [
+            NodePayloadMetricRecord(
+                metric_id=row["metric_id"],
+                trace_id=row["trace_id"],
+                task_id=row["task_id"],
+                node=row["node"],
+                input_chars=row["input_chars"],
+                output_chars=row["output_chars"],
+                output_bytes=row["output_bytes"],
+                output_rows=row["output_rows"],
+                created_at=row["created_at"],
+            )
+            for row in rows
+        ]
+
     def list_token_usage(self, task_id: str | None = None, limit: int = 100) -> list[TokenUsageRecord]:
         params: list[Any] = []
         where = ""
@@ -291,23 +376,64 @@ class AgentOpsStorage:
             ).fetchall()
         return [self._row_to_eval_run(row) for row in rows]
 
-    def summary_counts(self) -> dict[str, Any]:
+    def summary_counts(self, tenant_id: str | None = None, user_id: str | None = None) -> dict[str, Any]:
+        clauses: list[str] = []
+        params: list[Any] = []
+        if tenant_id:
+            clauses.append("tenant_id = ?")
+            params.append(tenant_id)
+        if user_id:
+            clauses.append("user_id = ?")
+            params.append(user_id)
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         with self._connect() as conn:
-            status_rows = conn.execute("SELECT status, COUNT(*) AS count FROM agent_tasks GROUP BY status").fetchall()
+            status_rows = conn.execute(
+                f"SELECT status, COUNT(*) AS count FROM agent_tasks {where} GROUP BY status",
+                params,
+            ).fetchall()
+            usage_clauses = ["u.source = 'provider'"]
+            usage_params: list[Any] = []
+            if tenant_id:
+                usage_clauses.append("t.tenant_id = ?")
+                usage_params.append(tenant_id)
+            if user_id:
+                usage_clauses.append("t.user_id = ?")
+                usage_params.append(user_id)
             token_row = conn.execute(
-                "SELECT COALESCE(SUM(total_tokens), 0) AS total_tokens, "
-                "COALESCE(SUM(estimated_cost_usd), 0) AS estimated_cost_usd FROM token_usage"
+                "SELECT COALESCE(SUM(u.total_tokens), 0) AS total_tokens, "
+                "COALESCE(SUM(u.estimated_cost_usd), 0) AS estimated_cost_usd "
+                "FROM token_usage u JOIN agent_tasks t ON t.task_id = u.task_id "
+                f"WHERE {' AND '.join(usage_clauses)}",
+                usage_params,
+            ).fetchone()
+            payload_clauses: list[str] = []
+            payload_params: list[Any] = []
+            if tenant_id:
+                payload_clauses.append("t.tenant_id = ?")
+                payload_params.append(tenant_id)
+            if user_id:
+                payload_clauses.append("t.user_id = ?")
+                payload_params.append(user_id)
+            payload_where = f"WHERE {' AND '.join(payload_clauses)}" if payload_clauses else ""
+            payload_row = conn.execute(
+                "SELECT COALESCE(SUM(p.output_bytes), 0) AS output_bytes "
+                "FROM node_payload_metrics p JOIN agent_tasks t ON t.task_id = p.task_id "
+                f"{payload_where}",
+                payload_params,
             ).fetchone()
         statuses = {row["status"]: int(row["count"]) for row in status_rows}
         return {
             "statuses": statuses,
             "total_tokens": int(token_row["total_tokens"]) if token_row else 0,
             "estimated_cost_usd": float(token_row["estimated_cost_usd"]) if token_row else 0.0,
+            "deterministic_payload_bytes": int(payload_row["output_bytes"]) if payload_row else 0,
         }
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=10)
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=10000")
         return conn
 
     def _row_to_task(self, row: sqlite3.Row) -> AgentTaskRecord:

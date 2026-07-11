@@ -11,6 +11,9 @@
         <span>{{ profile.numeric_columns.length }} 个数值字段</span>
       </div>
       <div class="topbar-actions">
+        <button v-if="running" class="nav-button" @click="handleCancel">
+          <span>取消任务</span>
+        </button>
         <button class="nav-button" @click="emit('openOps')">
           <Gauge :size="16" />
           <span>AgentOps</span>
@@ -78,7 +81,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, ref } from 'vue'
 import { Activity, ClipboardList, Gauge, ListChecks } from '@lucide/vue'
-import { createAnalysisTask, subscribeToTask } from '../api/analysis'
+import { cancelAnalysisTask, createAnalysisTask, subscribeToTask } from '../api/analysis'
 import { uploadDataset } from '../api/datasets'
 import type { ChartArtifact, DatasetMetadata, DatasetProfile, ExecutionResult, TaskEvent } from '../api/types'
 import AgentTimeline from '../components/AgentTimeline.vue'
@@ -109,6 +112,7 @@ const executionPath = ref<string | null>(null)
 const sqlQueries = ref<string[]>([])
 const generatedCode = ref<string[]>([])
 const subQuestions = ref<string[]>([])
+const currentTaskId = ref<string | null>(null)
 let source: EventSource | null = null
 
 async function handleUpload(file: File) {
@@ -150,6 +154,7 @@ async function handleRun(question: string) {
   subQuestions.value = []
   try {
     const task = await createAnalysisTask(dataset.value.dataset_id, question)
+    currentTaskId.value = task.task_id
     source = subscribeToTask(task.task_id, handleTaskEvent, (message) => {
       if (running.value) error.value = message
     })
@@ -172,13 +177,23 @@ function handleTaskEvent(event: TaskEvent) {
   if (Array.isArray(payload.generated_code)) generatedCode.value = payload.generated_code.filter(isString)
   if (Array.isArray(payload.sub_questions)) subQuestions.value = payload.sub_questions.filter(isString)
   if (typeof payload.report_markdown === 'string') reportMarkdown.value = payload.report_markdown
-  if (event.event_type === 'task_completed' || event.event_type === 'task_failed') {
+  if (['task_completed', 'task_failed', 'task_cancelled'].includes(event.event_type)) {
     running.value = false
     source?.close()
     source = null
+    currentTaskId.value = null
   }
-  if (event.event_type === 'task_failed') {
+  if (event.event_type === 'task_failed' || event.event_type === 'task_cancelled') {
     error.value = event.message
+  }
+}
+
+async function handleCancel() {
+  if (!currentTaskId.value) return
+  try {
+    await cancelAnalysisTask(currentTaskId.value)
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '取消任务失败。'
   }
 }
 

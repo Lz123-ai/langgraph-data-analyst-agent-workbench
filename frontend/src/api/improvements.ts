@@ -1,9 +1,8 @@
 import type { ImprovementLogCreate, ImprovementLogEntry, ImprovementLogListResponse } from './types'
-
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? ''
+import { apiHeaders, apiUrl } from './client'
 
 export async function listImprovementLogs(limit = 20): Promise<ImprovementLogListResponse> {
-  const response = await fetch(`${API_BASE}/api/improvements?limit=${limit}`)
+  const response = await fetch(apiUrl('/api/improvements', { limit }), { headers: apiHeaders() })
   if (!response.ok) {
     throw new Error(await readError(response))
   }
@@ -11,9 +10,9 @@ export async function listImprovementLogs(limit = 20): Promise<ImprovementLogLis
 }
 
 export async function createImprovementLog(payload: ImprovementLogCreate): Promise<ImprovementLogEntry> {
-  const response = await fetch(`${API_BASE}/api/improvements`, {
+  const response = await fetch(apiUrl('/api/improvements'), {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: apiHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(payload)
   })
   if (!response.ok) {

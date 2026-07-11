@@ -43,7 +43,14 @@ if ($Install) {
     if (-not (Test-Path -LiteralPath $Python)) {
         python -m venv (Join-Path $Root ".venv")
     }
-    & $Python -m pip install -r (Join-Path $Root "requirements.txt")
+    & $Python -c "import pip" 2>$null
+    if ($LASTEXITCODE -eq 0) {
+        & $Python -m pip install -r (Join-Path $Root "requirements.txt")
+    } elseif (Get-Command uv -ErrorAction SilentlyContinue) {
+        uv pip install --python $Python -r (Join-Path $Root "requirements.txt")
+    } else {
+        throw "The environment has no pip and uv is unavailable. Recreate .venv with: python -m venv .venv"
+    }
     Push-Location $FrontendDir
     npm install
     Pop-Location

@@ -7,7 +7,6 @@ from fastapi import HTTPException
 
 from app.settings import settings
 
-
 SUPPORTED_CSV = {".csv"}
 SUPPORTED_EXCEL = {".xlsx", ".xls"}
 SUPPORTED_EXTENSIONS = SUPPORTED_CSV | SUPPORTED_EXCEL
@@ -35,20 +34,33 @@ def detect_file_type(file_path: str | Path) -> str:
 def read_dataframe(file_path: str | Path, nrows: int | None = None) -> pd.DataFrame:
     path = assert_upload_path(file_path)
     file_type = detect_file_type(path)
+    read_limit = nrows if nrows is not None else settings.max_dataset_rows + 1
     if file_type == "csv":
         try:
-            df = pd.read_csv(path, nrows=nrows)
+            df = pd.read_csv(path, nrows=read_limit)
         except UnicodeDecodeError:
-            df = pd.read_csv(path, nrows=nrows, encoding="utf-8-sig")
+            df = pd.read_csv(path, nrows=read_limit, encoding="utf-8-sig")
         except Exception as exc:
             raise HTTPException(status_code=400, detail=f"Unable to read CSV file: {exc}") from exc
     else:
         try:
-            df = pd.read_excel(path, nrows=nrows, engine="openpyxl")
+            df = pd.read_excel(path, nrows=read_limit, engine="openpyxl")
         except Exception as exc:
             raise HTTPException(status_code=400, detail=f"Unable to read Excel file: {exc}") from exc
 
     df.columns = [str(column).strip() for column in df.columns]
+    if any(not column for column in df.columns):
+        raise HTTPException(status_code=400, detail="Dataset contains an empty column name.")
+    if len(df.columns) > settings.max_dataset_columns:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Dataset has {len(df.columns)} columns; limit is {settings.max_dataset_columns}.",
+        )
+    if nrows is None and len(df) > settings.max_dataset_rows:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Dataset exceeds the {settings.max_dataset_rows}-row limit.",
+        )
     return df
 
 

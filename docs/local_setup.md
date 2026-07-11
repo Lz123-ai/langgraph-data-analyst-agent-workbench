@@ -67,6 +67,20 @@ docker compose down
 
 Persistent backend data is stored in the `backend_data` Docker volume.
 
+On Windows without Docker/WSL, open an Administrator PowerShell and run:
+
+```powershell
+.\scripts\install-docker-prerequisites.ps1
+```
+
+Restart Windows, launch Docker Desktop once, then build and smoke-test both images with:
+
+```powershell
+.\scripts\verify-docker.ps1
+```
+
+If Docker Hub token requests time out while HTTPS works in the browser, Docker Desktop may not be using the Windows proxy or may be attempting an unavailable IPv6 route. In Docker Desktop settings, configure the same HTTP/HTTPS proxy used by Windows and select IPv4-only networking (or filter IPv6 DNS records), restart Docker Desktop completely, and rerun the verification script.
+
 ## Environment Variables
 
 Copy `.env.example` to `.env` only when you need custom values:
@@ -80,9 +94,13 @@ To enable LLM-based understanding:
 
 ```env
 USE_LLM=true
-OPENAI_API_KEY=your_key_here
-OPENAI_MODEL=gpt-4.1-mini
+LLM_PROVIDER=openai_compatible
+LLM_MODEL=provider-model-name
+LLM_API_KEY=provider-api-key
+LLM_BASE_URL=https://provider.example.com/v1
 ```
+
+OpenAI and local Ollama configurations are documented in [Model Providers](model_providers.md).
 
 ## Validation
 
@@ -95,6 +113,6 @@ npm run build
 
 Expected baseline:
 
-- Backend tests pass.
-- Batch Agent evaluation passes.
+- Backend tests: 49 pass with at least 75% source coverage.
+- Batch Agent evaluation: 18/18 pass; enterprise evaluation: 8/8 pass.
 - Frontend production build passes.

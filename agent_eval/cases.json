@@ -171,5 +171,41 @@
       "销售额": 300
     },
     "report_keywords": ["商品 Pareto", "累计销售额占比"]
+  },
+  {
+    "id": "out_of_domain_weather_en",
+    "dataset_path": "agent_eval/fixtures/sales_orders_cn.csv",
+    "question": "What is the weather today?",
+    "expected_kind": "unanswerable_with_current_schema",
+    "expected_path": "pandas",
+    "first_row_contains": {"status": "unanswerable"},
+    "report_keywords": ["无法", "外部"]
+  },
+  {
+    "id": "unsupported_prediction_en",
+    "dataset_path": "agent_eval/fixtures/sales_orders_cn.csv",
+    "question": "Predict next month's sales and give an exact number.",
+    "expected_kind": "unanswerable_with_current_schema",
+    "expected_path": "pandas",
+    "first_row_contains": {"status": "unanswerable"},
+    "report_keywords": ["预测", "回测"]
+  },
+  {
+    "id": "unsupported_causality_en",
+    "dataset_path": "agent_eval/fixtures/sales_orders_cn.csv",
+    "question": "Does sales cause profit?",
+    "expected_kind": "unanswerable_with_current_schema",
+    "expected_path": "pandas",
+    "first_row_contains": {"status": "unanswerable"},
+    "report_keywords": ["因果", "相关"]
+  },
+  {
+    "id": "profile_value_filter_cn",
+    "dataset_path": "agent_eval/fixtures/sales_orders_cn.csv",
+    "question": "只统计上海的总销售额",
+    "expected_kind": "group_aggregate",
+    "expected_path": "duckdb_sql",
+    "first_row_contains": {"dimension": "上海", "sum_销售额": 51200},
+    "report_keywords": ["上海", "51200"]
   }
 ]

@@ -1,12 +1,12 @@
 import type { DatasetPreviewResponse, DatasetUploadResponse } from './types'
-
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? ''
+import { apiHeaders, apiUrl } from './client'
 
 export async function uploadDataset(file: File): Promise<DatasetUploadResponse> {
   const form = new FormData()
   form.append('file', file)
-  const response = await fetch(`${API_BASE}/api/datasets/upload`, {
+  const response = await fetch(apiUrl('/api/datasets/upload'), {
     method: 'POST',
+    headers: apiHeaders(),
     body: form
   })
   if (!response.ok) {
@@ -16,7 +16,7 @@ export async function uploadDataset(file: File): Promise<DatasetUploadResponse> 
 }
 
 export async function getDatasetPreview(datasetId: string, limit = 20): Promise<DatasetPreviewResponse> {
-  const response = await fetch(`${API_BASE}/api/datasets/${datasetId}/preview?limit=${limit}`)
+  const response = await fetch(apiUrl(`/api/datasets/${datasetId}/preview`, { limit }), { headers: apiHeaders() })
   if (!response.ok) {
     throw new Error(await readError(response))
   }

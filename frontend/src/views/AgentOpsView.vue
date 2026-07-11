@@ -3,7 +3,7 @@
     <header class="topbar">
       <div>
         <h1>AgentOps 控制台</h1>
-        <p>查看任务持久化、节点追踪、Token 成本和批量评测结果。</p>
+        <p>查看持久任务、节点追踪、真实模型用量、规则节点负载和批量评测结果。</p>
       </div>
       <div class="topbar-actions">
         <button class="nav-button" :disabled="loading" @click="loadOps">
@@ -42,7 +42,7 @@
               <tr>
                 <th>状态</th>
                 <th>问题</th>
-                <th>Token</th>
+                <th>实际 Token</th>
                 <th>耗时</th>
                 <th>用户</th>
                 <th>操作</th>
@@ -107,7 +107,7 @@
         <span>模型：{{ selectedTask.task.model_name }}</span>
         <span>Prompt：{{ selectedTask.task.prompt_version }}</span>
         <span>预算：{{ selectedTask.task.token_budget }}</span>
-        <span>成本：${{ selectedTask.task.estimated_cost_usd.toFixed(6) }}</span>
+        <span>估算模型成本：${{ selectedTask.task.estimated_cost_usd.toFixed(6) }}</span>
       </div>
 
       <div class="ops-detail-grid">
@@ -138,7 +138,7 @@
         </div>
 
         <div>
-          <h3>Token 记录</h3>
+          <h3>真实/历史 Token 记录</h3>
           <div class="table-wrap compact">
             <table>
               <thead>
@@ -148,6 +148,7 @@
                   <th>输出</th>
                   <th>合计</th>
                   <th>成本</th>
+                  <th>来源</th>
                 </tr>
               </thead>
               <tbody>
@@ -157,6 +158,23 @@
                   <td>{{ usage.completion_tokens }}</td>
                   <td>{{ usage.total_tokens }}</td>
                   <td>${{ usage.estimated_cost_usd.toFixed(6) }}</td>
+                  <td>{{ usage.source === 'provider' ? '模型返回' : '历史估算' }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <h3>规则节点负载</h3>
+          <div class="table-wrap compact">
+            <table>
+              <thead>
+                <tr><th>节点</th><th>输出字符</th><th>输出字节</th><th>结果行</th></tr>
+              </thead>
+              <tbody>
+                <tr v-for="metric in selectedTask.payload_metrics" :key="metric.metric_id">
+                  <td>{{ metric.node }}</td>
+                  <td>{{ metric.output_chars }}</td>
+                  <td>{{ metric.output_bytes }}</td>
+                  <td>{{ metric.output_rows }}</td>
                 </tr>
               </tbody>
             </table>
@@ -186,8 +204,9 @@ const summaryCards = computed(() => [
   { label: '任务总数', value: summary.value?.task_count ?? 0, icon: Activity },
   { label: '运行中', value: summary.value?.running_count ?? 0, icon: Timer },
   { label: '失败任务', value: summary.value?.failed_count ?? 0, icon: ClipboardCheck },
-  { label: 'Token 合计', value: summary.value?.total_tokens ?? 0, icon: Database },
-  { label: '估算成本', value: `$${(summary.value?.estimated_cost_usd ?? 0).toFixed(6)}`, icon: Coins }
+  { label: '实际 Token', value: summary.value?.total_tokens ?? 0, icon: Database },
+  { label: '估算模型成本', value: `$${(summary.value?.estimated_cost_usd ?? 0).toFixed(6)}`, icon: Coins },
+  { label: '规则输出负载', value: formatBytes(summary.value?.deterministic_payload_bytes ?? 0), icon: Database }
 ])
 
 async function loadOps() {
@@ -262,6 +281,12 @@ function formatDate(value: string): string {
     hour: '2-digit',
     minute: '2-digit'
   }).format(new Date(value))
+}
+
+function formatBytes(value: number): string {
+  if (value < 1024) return `${value} B`
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`
+  return `${(value / 1024 / 1024).toFixed(1)} MB`
 }
 
 onMounted(loadOps)

@@ -6,12 +6,21 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
-
-TaskStatus = Literal["queued", "running", "succeeded", "failed"]
-EventType = Literal["task_started", "node_completed", "task_completed", "task_failed", "heartbeat"]
+TaskStatus = Literal["queued", "running", "succeeded", "failed", "cancelled"]
+EventType = Literal[
+    "task_started",
+    "task_resumed",
+    "task_retried",
+    "node_completed",
+    "task_completed",
+    "task_failed",
+    "task_cancelled",
+    "heartbeat",
+]
 
 
 class TaskEvent(BaseModel):
+    sequence_id: int | None = None
     event_id: str = Field(default_factory=lambda: uuid4().hex)
     task_id: str
     event_type: EventType

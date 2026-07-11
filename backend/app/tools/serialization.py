@@ -7,6 +7,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from app.settings import settings
+
 
 def to_jsonable(value: Any) -> Any:
     if value is None:
@@ -33,5 +35,6 @@ def to_jsonable(value: Any) -> Any:
 
 
 def dataframe_to_records(df: pd.DataFrame, limit: int | None = None) -> list[dict[str, Any]]:
-    frame = df.head(limit) if limit is not None else df
+    effective_limit = settings.max_result_rows if limit is None else min(limit, settings.max_result_rows)
+    frame = df.head(effective_limit)
     return [to_jsonable(row) for row in frame.to_dict(orient="records")]

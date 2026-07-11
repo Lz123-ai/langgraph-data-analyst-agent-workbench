@@ -5,7 +5,6 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-
 ImprovementStatus = Literal["open", "resolved", "monitoring"]
 
 
@@ -27,6 +26,8 @@ class ImprovementLogUpdate(BaseModel):
 
 class ImprovementLogEntry(BaseModel):
     log_id: str
+    tenant_id: str = "system"
+    user_id: str = "system"
     issue: str
     resolution: str
     status: ImprovementStatus

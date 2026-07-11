@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import re
-from typing import Any
 
 import duckdb
 import pandas as pd
 from fastapi import HTTPException
 
+from app.settings import settings
 
 FORBIDDEN_SQL_PATTERNS = re.compile(
     r"\b(copy|attach|install|load|pragma|create|insert|update|delete|drop|alter|export|import|read_csv|read_parquet|read_json)\b",
@@ -30,7 +30,8 @@ def validate_select_sql(sql: str) -> None:
 
 def execute_select(df: pd.DataFrame, sql: str, limit: int = 200) -> pd.DataFrame:
     validate_select_sql(sql)
-    limited_sql = f"SELECT * FROM ({sql.strip().rstrip(';')}) AS safe_result LIMIT {int(limit)}"
+    safe_limit = max(1, min(int(limit), settings.max_result_rows))
+    limited_sql = f"SELECT * FROM ({sql.strip().rstrip(';')}) AS safe_result LIMIT {safe_limit}"
     connection = None
     try:
         connection = duckdb.connect(database=":memory:", read_only=False)

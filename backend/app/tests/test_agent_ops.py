@@ -32,11 +32,20 @@ def test_agent_ops_service_records_task_trace_tokens_and_eval(tmp_path) -> None:
         duration_ms=0,
         output_summary="识别为数据概览。",
     )
-    service.record_estimated_token_usage(
+    service.record_node_payload_metric(
         task_id=task.task_id,
         node="understand_question",
-        prompt_text="这个数据集有多少行？",
-        completion_payload={"analysis_goal": "dataset_overview"},
+        input_summary="这个数据集有多少行？",
+        output_payload={"analysis_goal": "dataset_overview"},
+    )
+    service.record_token_usage(
+        task_id=task.task_id,
+        node="understand_question",
+        model_name="test-model",
+        prompt_version="test-v1",
+        prompt_tokens=10,
+        completion_tokens=5,
+        source="provider",
     )
     service.complete_task(task.task_id, {"execution_result": {"kind": "dataset_overview"}})
     service.record_eval_report(
@@ -57,6 +66,7 @@ def test_agent_ops_service_records_task_trace_tokens_and_eval(tmp_path) -> None:
     assert usage[0].total_tokens > 0
     assert summary.task_count == 1
     assert summary.total_tokens == usage[0].total_tokens
+    assert summary.deterministic_payload_bytes > 0
     assert eval_runs[0].passed == 1
 
 

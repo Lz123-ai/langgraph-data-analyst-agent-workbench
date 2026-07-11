@@ -24,3 +24,4 @@ class AnalysisState(TypedDict, total=False):
     question_understanding: dict[str, Any] | None
     dataset_preview: list[dict[str, Any]]
     sub_questions: list[str]
+    llm_usage: dict[str, Any] | None

@@ -15,6 +15,11 @@ class AnalysisTaskResponse(BaseModel):
     status: str
 
 
+class AnalysisCancelResponse(BaseModel):
+    task_id: str
+    status: str
+
+
 class AnalysisTaskStatusResponse(BaseModel):
     task_id: str
     trace_id: str | None = None
