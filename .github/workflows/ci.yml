@@ -26,8 +26,14 @@ jobs:
       - run: coverage report --fail-under=75
       - if: matrix.python-version == '3.11'
         run: python agent_eval/run_batch_eval.py
-      - if: matrix.python-version == '3.11'
-        run: python agent_eval/enterprise_business_eval.py
+      - name: Run enterprise evaluation when private fixture is available
+        if: matrix.python-version == '3.11'
+        run: |
+          if [ -f "external_eval_data/enterprise_agent_eval_dataset_20260703_221458/benchmarks.json" ] || [ -f "external_eval_data/enterprise_agent_eval_dataset_20260703_221458.zip" ]; then
+            python agent_eval/enterprise_business_eval.py
+          else
+            echo "::notice::Enterprise evaluation skipped: its external fixture is not part of the public repository. Run it locally with --data-dir or provide the fixture through a protected workflow."
+          fi
 
   frontend:
     runs-on: ubuntu-latest
