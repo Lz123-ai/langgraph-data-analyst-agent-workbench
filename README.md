@@ -191,6 +191,7 @@ npm run test:e2e
 - [安全政策](SECURITY.md)
 - [变更记录](CHANGELOG.md)
 - [交给其他 AI 测试](AGENT_HANDOFF.md)
+- [独立 AI 测试任务书](docs/independent_ai_test_brief.md)
 
 ## 参与贡献
 

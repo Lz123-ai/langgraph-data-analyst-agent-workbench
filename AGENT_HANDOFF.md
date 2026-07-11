@@ -1,5 +1,7 @@
 # Handoff For Another Testing Agent
 
+For a formal Chinese test scope, acceptance criteria, severity model, and report template, read [Independent AI Test Brief](docs/independent_ai_test_brief.md) before testing.
+
 ## Objective
 
 Test this LangGraph Data Analyst Agent Workbench as a portfolio-grade Agent project. Do not only inspect code. Run the automated tests, run the batch natural-language evaluation, then use the UI for a small number of exploratory checks.
